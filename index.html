@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schema Scanner</title>
+<style>
+  :root{--bg:#faf8f5;--card:#fff;--text:#1f2328;--muted:#6b7280;--line:#e3ded6;--accent:#2f6f5e;--accent-text:#fff;--err:#b42318;--warn:#b54708;--info:#1d5fa8;--ok:#2f6f5e;--code:#f3f0ea}
+  @media (prefers-color-scheme:dark){:root{--bg:#16181a;--card:#1e2124;--text:#e8e6e3;--muted:#9aa0a6;--line:#33383d;--accent:#5fb89f;--accent-text:#10211c;--err:#ff8a80;--warn:#ffb74d;--info:#7db7f0;--ok:#5fb89f;--code:#14171a}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+  main{max-width:1000px;margin:0 auto;padding:24px 16px 80px}
+  h1{font-size:1.6rem;margin:0 0 4px}
+  h2{font-size:1.15rem;margin:32px 0 10px}
+  p.sub{color:var(--muted);margin:0 0 20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:12px}
+  label{display:block;font-size:.85rem;color:var(--muted);margin:0 0 4px}
+  input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--text);font:inherit}
+  textarea{font-family:ui-monospace,Consolas,monospace;font-size:.82rem}
+  .row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .row>div{flex:1 1 200px}
+  .row>div.grow{flex:3 1 320px}
+  button{background:var(--accent);color:var(--accent-text);border:0;border-radius:7px;padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
+  button.sec{background:transparent;color:var(--text);border:1px solid var(--line)}
+  button:disabled{opacity:.5;cursor:default}
+  .tabs{display:flex;gap:6px;margin-bottom:12px}
+  .tabs button{background:transparent;color:var(--muted);border:1px solid var(--line)}
+  .tabs button.on{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+  .hide{display:none}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .stat b{display:block;font-size:1.5rem}
+  .stat span{color:var(--muted);font-size:.8rem}
+  .issue{border-left:4px solid var(--line);padding:10px 12px;margin-bottom:10px;background:var(--card);border-radius:0 8px 8px 0;border:1px solid var(--line);border-left-width:4px}
+  .issue.error{border-left-color:var(--err)}.issue.warn{border-left-color:var(--warn)}.issue.info{border-left-color:var(--info)}
+  .tag{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-right:6px}
+  .error .tag{color:var(--err)}.warn .tag{color:var(--warn)}.info .tag{color:var(--info)}
+  .issue .fix{margin-top:4px}
+  .issue .pg{color:var(--muted);font-size:.82rem;margin-top:4px;word-break:break-word}
+  details{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:8px}
+  summary{cursor:pointer;word-break:break-all}
+  summary .badge{display:inline-block;background:var(--code);border-radius:99px;padding:0 8px;margin-left:6px;font-size:.75rem;color:var(--muted)}
+  pre{background:var(--code);padding:10px;border-radius:7px;overflow:auto;font-size:.78rem;max-height:340px;margin:8px 0}
+  table{width:100%;border-collapse:collapse;font-size:.9rem}
+  td,th{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line)}
+  #log{font-size:.82rem;color:var(--muted);max-height:120px;overflow:auto;white-space:pre-wrap;margin-top:8px}
+  .note{font-size:.82rem;color:var(--muted)}
+  #prog{margin-top:12px}
+  #progTop{display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:4px}
+  #progTrack{height:12px;background:var(--code);border:1px solid var(--line);border-radius:99px;overflow:hidden}
+  #progBar{height:100%;width:0;background:var(--accent);border-radius:99px;transition:width .25s ease}
+  #progBar.indet{width:35%;animation:slide 1.1s ease-in-out infinite alternate}
+  #progBar.stopped{background:var(--warn)}
+  @keyframes slide{from{margin-left:0}to{margin-left:65%}}
+  .ok{color:var(--ok)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Schema Scanner</h1>
+  <p class="sub">Scan a website's structured data (JSON-LD, microdata, RDFa), see what each page has, get suggested fixes, and copy a ready-made AI prompt. Runs entirely in your browser. No AI credits used.</p>
+
+  <div class="card">
+    <div class="tabs">
+      <button id="tabCrawl" class="on" type="button">Crawl a website</button>
+      <button id="tabPaste" type="button">Paste page HTML</button>
+    </div>
+
+    <div id="paneCrawl">
+      <div class="row">
+        <div class="grow"><label for="url">Website URL</label><input id="url" placeholder="https://example.com" autocomplete="off"></div>
+        <div><label for="max">Max pages</label><input id="max" type="number" min="1" max="500" value="60"></div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="proxy">How to fetch pages</label>
+          <select id="proxy">
+            <option value="allorigins">Public CORS proxy (allorigins.win)</option>
+            <option value="corsproxy">Public CORS proxy (corsproxy.io)</option>
+            <option value="direct">Direct (only works if the site allows it)</option>
+            <option value="custom">Custom proxy prefix</option>
+          </select>
+        </div>
+        <div id="customWrap" class="hide"><label for="custom">Proxy prefix (URL is appended, encoded)</label><input id="custom" placeholder="https://my-proxy.example/?url="></div>
+      </div>
+      <p class="note">Browsers block reading other sites' pages directly, so a proxy relays the request. The proxy sees the public page URLs you scan. If a proxy is blocked or flaky, switch to the other one, or use the "Paste page HTML" tab.</p>
+    </div>
+
+    <div id="panePaste" class="hide">
+      <div class="row"><div class="grow"><label for="pasteUrl">Page URL (optional, used to resolve relative links)</label><input id="pasteUrl" placeholder="https://example.com/page"></div></div>
+      <label for="pasteHtml">Page source (View Source, select all, copy)</label>
+      <textarea id="pasteHtml" rows="8" placeholder="<!doctype html>..."></textarea>
+      <p class="note">Paste one page at a time. Click Scan again with new HTML to add more pages to the same report.</p>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button id="go" type="button">Scan</button>
+      <button id="stop" type="button" class="sec hide">Stop</button>
+      <button id="clear" type="button" class="sec">Clear results</button>
+    </div>
+    <div id="prog" class="hide" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div id="progTop"><span id="progLabel">Starting...</span><b id="progPct">0%</b></div>
+      <div id="progTrack"><div id="progBar"></div></div>
+    </div>
+    <div id="log"></div>
+  </div>
+
+  <div id="results" class="hide">
+    <h2>Summary</h2>
+    <div class="stats" id="stats"></div>
+
+    <h2>Suggested improvements</h2>
+    <div id="issues"></div>
+
+    <h2>Schema types found</h2>
+    <div class="card"><table id="types"></table></div>
+
+    <h2>AI prompt (copy and paste into any AI)</h2>
+    <div class="card">
+      <label for="notes">Optional: your tech stack or extra instructions (added to the prompt)</label>
+      <input id="notes" placeholder="e.g. Astro site, JSON-LD goes in src/layouts/Layout.astro">
+      <div style="margin:10px 0 8px"><label for="prompt">Prompt</label></div>
+      <textarea id="prompt" rows="16" readonly></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="copy" type="button">Copy prompt</button>
+        <button id="dl" type="button" class="sec">Download full report (JSON)</button>
+      </div>
+    </div>
+
+    <h2>Schema on each page</h2>
+    <div id="pages"></div>
+  </div>
+</main>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+let pages = [];          // {url,title,error,items,hasTestimonialText,depth}
+let stopFlag = false;
+let rootUrl = '';
+let lastIssues = [];
+let crawlWarnings = [];
+
+/* ---------- small helpers ---------- */
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const k in (attrs || {})) {
+    if (k === 'class') e.className = attrs[k]; else e.setAttribute(k, attrs[k]);
+  }
+  kids.flat().forEach(c => { if (c != null) e.append(c.nodeType ? c : document.createTextNode(String(c))); });
+  return e;
+}
+const log = m => { const l = $('log'); l.textContent += m + '\n'; l.scrollTop = l.scrollHeight; };
+function progress(label, pct) {  // pct = number 0-100, or null for "working, unknown length"
+  $('prog').classList.remove('hide');
+  const bar = $('progBar');
+  bar.classList.remove('stopped');
+  $('progLabel').textContent = label;
+  if (pct == null) { bar.classList.add('indet'); bar.style.width = ''; $('progPct').textContent = '...'; $('prog').removeAttribute('aria-valuenow'); }
+  else {
+    bar.classList.remove('indet');
+    const p = Math.max(0, Math.min(100, Math.round(pct)));
+    bar.style.width = p + '%'; $('progPct').textContent = p + '%'; $('prog').setAttribute('aria-valuenow', p);
+  }
+}
+const arr = v => v == null ? [] : Array.isArray(v) ? v : [v];
+const typeName = t => String(t).replace(/^https?:\/\/schema\.org\//i, '').replace(/^schema:/i, '').split('/').pop().replace(/^.*#/, '');
+function normUrl(u) {
+  const x = new URL(u); x.hash = '';
+  let s = x.href; if (s.endsWith('/') && x.pathname !== '/') s = s.slice(0, -1); return s;
+}
+const hostKey = u => new URL(u).hostname.replace(/^www\./, '');
+
+/* ---------- fetching ---------- */
+async function fetchText(u) {
+  const mode = $('proxy').value;
+  let url = u;
+  if (mode === 'allorigins') url = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u);
+  else if (mode === 'corsproxy') url = 'https://corsproxy.io/?url=' + encodeURIComponent(u);
+  else if (mode === 'custom') url = $('custom').value.trim() + encodeURIComponent(u);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 25000);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.text();
+  } finally { clearTimeout(t); }
+}
+
+/* ---------- sitemap ---------- */
+async function sitemapUrls(origin) {
+  const found = new Set();
+  const queue = [];
+  try {
+    const robots = await fetchText(origin + '/robots.txt');
+    robots.split(/\r?\n/).forEach(l => { const m = l.match(/^\s*sitemap:\s*(\S+)/i); if (m) queue.push(m[1]); });
+  } catch (e) { /* ignore */ }
+  if (!queue.length) queue.push(origin + '/sitemap.xml', origin + '/sitemap_index.xml', origin + '/sitemap-index.xml');
+  const seen = new Set(); let fetched = 0;
+  while (queue.length && fetched < 15 && !stopFlag) {
+    const sm = queue.shift(); if (seen.has(sm)) continue; seen.add(sm);
+    try {
+      const xml = await fetchText(sm); fetched++;
+      const doc = new DOMParser().parseFromString(xml, 'text/xml');
+      if (doc.querySelector('parsererror')) continue;
+      const isIndex = !!doc.querySelector('sitemapindex');
+      doc.querySelectorAll('loc').forEach(l => {
+        const v = l.textContent.trim();
+        if (isIndex) queue.push(v); else found.add(v);
+      });
+      if (found.size) log('Sitemap: ' + sm + ' (' + found.size + ' URLs so far)');
+    } catch (e) { /* try next */ }
+  }
+  return [...found];
+}
+
+/* ---------- extraction ---------- */
+function jsonLd(doc) {
+  const out = [];
+  doc.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
+    const raw = s.textContent.trim();
+    if (!raw) { out.push({ format: 'JSON-LD', error: 'Empty JSON-LD block' }); return; }
+    try {
+      const data = JSON.parse(raw);
+      const ctx = arr(data['@context'] || (Array.isArray(data) ? data[0] && data[0]['@context'] : null)).map(String);
+      const nodes = [];
+      const push = n => { if (n && typeof n === 'object') { if (n['@graph']) arr(n['@graph']).forEach(push); else nodes.push(n); } };
+      arr(data).forEach(push);
+      out.push({ format: 'JSON-LD', data, nodes, context: ctx });
+    } catch (e) { out.push({ format: 'JSON-LD', error: 'Invalid JSON: ' + e.message, raw: raw.slice(0, 300) }); }
+  });
+  return out;
+}
+function addProp(o, k, v) { if (k in o) { o[k] = arr(o[k]).concat([v]); } else o[k] = v; }
+function propValue(el, scopeAttr, build) {
+  if (el.hasAttribute(scopeAttr)) return build(el);
+  if (el.hasAttribute('content')) return el.getAttribute('content');
+  const t = el.tagName;
+  if (['A', 'LINK', 'AREA'].includes(t)) return el.getAttribute('href');
+  if (['IMG', 'AUDIO', 'VIDEO', 'SOURCE', 'IFRAME'].includes(t)) return el.getAttribute('src');
+  if (el.hasAttribute('resource')) return el.getAttribute('resource');
+  if (t === 'TIME') return el.getAttribute('datetime') || el.textContent.trim();
+  return el.textContent.trim().replace(/\s+/g, ' ');
+}
+function microdata(doc) {
+  const build = el => {
+    const o = {};
+    const ty = el.getAttribute('itemtype'); if (ty) o['@type'] = ty.split(/\s+/).map(typeName)[0];
+    if (el.getAttribute('itemid')) o['@id'] = el.getAttribute('itemid');
+    const walk = n => {
+      for (const c of n.children) {
+        if (c.hasAttribute('itemprop')) {
+          const v = propValue(c, 'itemscope', build);
+          c.getAttribute('itemprop').split(/\s+/).forEach(p => addProp(o, p, v));
+        } else if (!c.hasAttribute('itemscope')) walk(c);
+      }
+    };
+    walk(el); return o;
+  };
+  return [...doc.querySelectorAll('[itemscope]')].filter(e => !e.hasAttribute('itemprop')).map(e => ({ format: 'Microdata', data: build(e), nodes: [build(e)] }));
+}
+function rdfa(doc) {
+  const build = el => {
+    const o = {};
+    const ty = el.getAttribute('typeof'); if (ty) o['@type'] = typeName(ty.split(/\s+/)[0]);
+    if (el.getAttribute('resource')) o['@id'] = el.getAttribute('resource');
+    const walk = n => {
+      for (const c of n.children) {
+        if (c.hasAttribute('property')) {
+          const v = propValue(c, 'typeof', build);
+          c.getAttribute('property').split(/\s+/).forEach(p => addProp(o, typeName(p), v));
+        } else if (!c.hasAttribute('typeof')) walk(c);
+      }
+    };
+    walk(el); return o;
+  };
+  return [...doc.querySelectorAll('[typeof]')].filter(e => !e.hasAttribute('property')).map(e => ({ format: 'RDFa', data: build(e), nodes: [build(e)] }));
+}
+function flatten(items) {
+  // every typed object anywhere in the tree, plus whether it is top-level
+  const out = [];
+  const visit = (n, top, fmt) => {
+    if (Array.isArray(n)) return n.forEach(x => visit(x, top, fmt));
+    if (!n || typeof n !== 'object') return;
+    if (n['@type']) out.push({ node: n, types: arr(n['@type']).map(typeName), top, format: fmt });
+    for (const k in n) if (!k.startsWith('@')) visit(n[k], false, fmt);
+  };
+  items.forEach(it => (it.nodes || []).forEach(n => visit(n, true, it.format)));
+  return out;
+}
+function parsePage(html, url) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const items = [...jsonLd(doc), ...microdata(doc), ...rdfa(doc)];
+  const body = (doc.body && doc.body.textContent || '').toLowerCase();
+  const links = [];
+  doc.querySelectorAll('a[href]').forEach(a => {
+    try {
+      const u = new URL(a.getAttribute('href'), url);
+      if (!/^https?:$/.test(u.protocol)) return;
+      links.push(u.href);
+    } catch (e) { /* skip */ }
+  });
+  return {
+    url, title: (doc.title || '').trim(), items, links,
+    hasTestimonialText: /testimonial|client reviews|what (my )?clients say|customer reviews/.test(body)
+  };
+}
+
+/* ---------- crawl ---------- */
+async function crawl(start, max) {
+  const origin = new URL(start).origin;
+  const startNorm = normUrl(start);
+  const host = hostKey(start);
+  const skipExt = /\.(pdf|jpe?g|png|gif|svg|webp|avif|zip|css|js|xml|json|mp4|mp3|ico|txt|docx?|xlsx?)$/i;
+  const queued = new Set([startNorm]);
+  const queue = [startNorm];
+
+  progress('Looking for a sitemap...', null);
+  log('Looking for a sitemap...');
+  const sm = await sitemapUrls(origin);
+  let accepted = 0; const offHosts = new Set();
+  sm.forEach(u => { try {
+    const n = normUrl(u);
+    if (hostKey(n) !== host) { offHosts.add(new URL(n).hostname); return; }
+    if (!skipExt.test(n)) { accepted++; if (!queued.has(n)) { queued.add(n); queue.push(n); } }
+  } catch (e) { } });
+  if (offHosts.size) {
+    const msg = 'The sitemap lists URLs on a different domain (' + [...offHosts].join(', ') + ') than the one you scanned (' + host + '). Those were not scanned.';
+    log('WARNING: ' + msg); crawlWarnings.push(msg);
+  }
+  if (!accepted) log(sm.length ? 'No sitemap URLs match this domain. Following internal links instead.' : 'No sitemap found. Following internal links instead.');
+  const useLinks = !accepted;
+
+  let active = 0, done = 0;
+  const tick = () => {
+    // total grows as new links are discovered, capped at the page limit
+    const total = Math.min(max, queued.size);
+    progress('Scanning page ' + Math.min(done + 1, total) + ' of ' + total + (useLinks ? '+ (finding more links)' : ''), done / total * 100);
+  };
+  tick();
+  const worker = async () => {
+    while (!stopFlag) {
+      if (done + active >= max) return;
+      const u = queue.shift();
+      if (!u) { if (active === 0) return; await new Promise(r => setTimeout(r, 150)); continue; }
+      active++;
+      try {
+        const html = await fetchText(u);
+        const p = parsePage(html, u);
+        pages.push(p);
+        log('OK  ' + u);
+        if (useLinks) p.links.forEach(l => {
+          try { const n = normUrl(l); if (hostKey(n) === host && !skipExt.test(n) && !queued.has(n)) { queued.add(n); queue.push(n); } } catch (e) { }
+        });
+      } catch (e) {
+        pages.push({ url: u, title: '', items: [], links: [], fetchError: e.message });
+        log('ERR ' + u + ' (' + e.message + ')');
+      }
+      active--; done++; tick();
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+}
+
+/* ---------- analysis ---------- */
+const ORG_LIKE = ['Organization', 'LocalBusiness', 'RealEstateAgent', 'RealEstateOrganization', 'ProfessionalService', 'Corporation', 'Store'];
+const BUSINESS = ['LocalBusiness', 'RealEstateAgent', 'ProfessionalService', 'Store', 'Restaurant', 'HomeAndConstructionBusiness'];
+const REC = {
+  Organization: ['name', 'url', 'logo', 'sameAs'],
+  RealEstateOrganization: ['name', 'url', 'logo', 'sameAs'],
+  LocalBusiness: ['name', 'url', 'image', 'telephone', 'address', 'sameAs', 'areaServed', 'openingHours|openingHoursSpecification'],
+  RealEstateAgent: ['name', 'url', 'image', 'telephone', 'address', 'sameAs', 'areaServed', 'description'],
+  Person: ['name', 'url', 'image', 'jobTitle', 'sameAs', 'worksFor'],
+  WebSite: ['name', 'url'],
+  WebPage: ['name', 'url'],
+  Service: ['name', 'provider', 'areaServed', 'description', 'serviceType'],
+  FAQPage: ['mainEntity'],
+  Question: ['name', 'acceptedAnswer'],
+  Answer: ['text'],
+  Article: ['headline', 'image', 'datePublished', 'author'],
+  BlogPosting: ['headline', 'image', 'datePublished', 'author'],
+  Product: ['name', 'image', 'offers', 'description'],
+  Review: ['author', 'reviewRating', 'reviewBody', 'itemReviewed'],
+  BreadcrumbList: ['itemListElement'],
+  ImageObject: ['contentUrl|url'],
+  Event: ['name', 'startDate', 'location'],
+  PostalAddress: ['addressLocality', 'addressRegion']
+};
+const MAIN_FOR_ID = ['Organization', 'RealEstateOrganization', 'LocalBusiness', 'RealEstateAgent', 'Person', 'WebSite', 'Service', 'ProfessionalService'];
+const missing = (node, props) => props.filter(p => !p.split('|').some(k => { const v = node[k]; return v != null && v !== '' && !(Array.isArray(v) && !v.length); }));
+const pathOf = u => { try { return new URL(u).pathname; } catch (e) { return u; } };
+const isHome = u => { try { const p = new URL(u).pathname; return p === '/' || p === ''; } catch (e) { return false; } };
+
+function analyze() {
+  const issues = [];
+  const add = (sev, title, detail, fix, pgs) => issues.push({ sev, title, detail, fix, pages: [...new Set(pgs || [])] });
+  const ok = pages.filter(p => !p.fetchError);
+  const noSchema = ok.filter(p => !p.items.length);
+  const withSchema = ok.filter(p => p.items.length);
+
+  crawlWarnings.forEach(w => add('warn', 'Sitemap points to a different domain', w, 'Set your site/canonical domain (e.g. "site" in astro.config.mjs and the url in your schema) to the domain you actually publish on, so the sitemap, canonical tags and schema all agree.', []));
+  const failed = pages.filter(p => p.fetchError);
+  if (failed.length) add('info', failed.length + ' page(s) could not be fetched', 'These were skipped, so their schema is unknown: ' + failed.map(p => p.fetchError).filter((v, i, a) => a.indexOf(v) === i).join(', '), 'Try the other proxy, or paste the page HTML manually.', failed.map(p => p.url));
+
+  if (noSchema.length) add(noSchema.length === ok.length ? 'error' : 'warn', noSchema.length + ' page(s) have no structured data', 'No JSON-LD, microdata or RDFa was found.', 'Add at least a WebPage (or a more specific type such as Service, Article or FAQPage) with a link back to your main Organization/Person entity.', noSchema.map(p => p.url));
+
+  // invalid JSON-LD
+  ok.forEach(p => p.items.filter(i => i.error).forEach(i => add('error', 'Invalid JSON-LD block', i.error, 'Fix the JSON syntax (commonly trailing commas, unescaped quotes, or smart quotes) so search engines can read it.', [p.url])));
+
+  // context
+  ok.forEach(p => p.items.filter(i => i.format === 'JSON-LD' && i.context && i.context.length).forEach(i => {
+    if (!i.context.some(c => /^https:\/\/schema\.org\/?$/.test(c))) add('warn', '@context is not "https://schema.org"', 'Found: ' + i.context.join(', '), 'Use "@context": "https://schema.org" (https, no trailing path).', [p.url]);
+  }));
+  ok.forEach(p => p.items.filter(i => i.format === 'JSON-LD' && i.nodes && !i.context.length).forEach(i => add('warn', 'JSON-LD block with no @context', 'Without @context the markup is not recognised as schema.org.', 'Add "@context": "https://schema.org".', [p.url])));
+
+  // entities
+  const ents = new Map(); ok.forEach(p => ents.set(p.url, flatten(p.items.filter(i => !i.error))));
+  const allEnts = [...ents.entries()].flatMap(([u, es]) => es.map(e => ({ ...e, page: u })));
+
+  // site-level entities on homepage
+  const home = ok.find(p => isHome(p.url));
+  if (home) {
+    const t = (ents.get(home.url) || []).flatMap(e => e.types);
+    if (!t.includes('WebSite')) add('warn', 'No WebSite entity on the homepage', 'The homepage has no WebSite markup.', 'Add a WebSite entity (name, url) with an @id such as https://yourdomain.com/#website.', [home.url]);
+    if (!t.some(x => ORG_LIKE.includes(x) || x === 'Person')) add('error', 'No Organization / business / Person entity on the homepage', 'Search engines have no main entity to attach your site to.', 'Add a RealEstateAgent / LocalBusiness / Organization (or Person) entity with name, url, logo or image, telephone, address, sameAs.', [home.url]);
+  }
+
+  // missing recommended properties, grouped
+  const groups = new Map();
+  allEnts.forEach(e => e.types.forEach(t => {
+    if (!REC[t]) return;
+    const m = missing(e.node, REC[t]);
+    if (!m.length) return;
+    const key = t + '|' + m.join(',');
+    if (!groups.has(key)) groups.set(key, { t, m, pages: [], name: e.node.name });
+    groups.get(key).pages.push(e.page);
+  }));
+  groups.forEach(g => {
+    const important = ['mainEntity', 'acceptedAnswer', 'text', 'itemListElement', 'name', 'reviewRating'];
+    const sev = g.m.some(x => important.includes(x)) ? 'warn' : 'info';
+    add(sev, g.t + ' is missing: ' + g.m.map(x => x.replace('|', ' or ')).join(', '), g.name ? 'Example entity: "' + g.name + '"' : '', 'Add ' + g.m.map(x => x.replace('|', ' or ')).join(', ') + ' to the ' + g.t + ' markup (only with accurate, visible-on-site information).', g.pages);
+  });
+
+  // @id linking
+  const noId = allEnts.filter(e => e.top && e.format === 'JSON-LD' && e.types.some(t => MAIN_FOR_ID.includes(t)) && !e.node['@id']);
+  if (noId.length) {
+    const tList = [...new Set(noId.flatMap(e => e.types.filter(t => MAIN_FOR_ID.includes(t))))];
+    add('warn', 'No @id on key entities (' + tList.join(', ') + ')', noId.length + ' top-level entity block(s) have no @id, so each page describes you separately instead of pointing at one canonical entity.', 'Give each key entity a stable @id (e.g. https://yourdomain.com/#agent, #website, #org) and reference it from other pages with {"@id": "..."} instead of repeating the full block.', noId.map(e => e.page));
+  }
+  // repeated same entity across pages without @id
+  const rep = new Map();
+  allEnts.filter(e => e.top && e.node.name && !e.node['@id']).forEach(e => { const k = e.types.join('/') + '|' + e.node.name; (rep.get(k) || rep.set(k, []).get(k)).push(e.page); });
+  rep.forEach((pgs, k) => { const u = [...new Set(pgs)]; if (u.length > 1) add('info', '"' + k.split('|')[1] + '" (' + k.split('|')[0] + ') is repeated on ' + u.length + ' pages with no @id', 'The same entity is fully re-described on each page.', 'Define it once with an @id and reference it elsewhere.', u); });
+
+  // duplicates on a page
+  ok.forEach(p => {
+    const top = (ents.get(p.url) || []).filter(e => e.top);
+    const seen = {};
+    top.forEach(e => e.types.forEach(t => { const k = t + '|' + (e.node['@id'] || e.node.name || ''); (seen[k] = seen[k] || []).push(e.format); }));
+    Object.keys(seen).forEach(k => { if (seen[k].length > 1) add('warn', 'Duplicate ' + k.split('|')[0] + ' markup on one page', 'Found ' + seen[k].length + ' copies (' + [...new Set(seen[k])].join(' + ') + ').', 'Keep one copy; remove the duplicate (often a theme/plugin plus a manual block).', [p.url]); });
+    const fm = [...new Set(p.items.filter(i => !i.error).map(i => i.format))];
+    if (fm.length > 1) add('info', 'Mixed markup formats on one page (' + fm.join(', ') + ')', '', 'Prefer a single format, ideally JSON-LD.', [p.url]);
+  });
+
+  // relative urls and empty values
+  allEnts.forEach(e => ['url', 'image', 'logo', 'contentUrl', 'sameAs'].forEach(k => arr(e.node[k]).forEach(v => {
+    if (typeof v === 'string' && v && !/^https?:\/\//i.test(v) && !v.startsWith('data:')) add('warn', 'Relative or malformed URL in "' + k + '"', 'Value: ' + v, 'Use absolute URLs (https://yourdomain.com/...) in schema properties.', [e.page]);
+  })));
+  allEnts.forEach(e => Object.keys(e.node).forEach(k => { if (!k.startsWith('@') && e.node[k] === '') add('warn', 'Empty value for "' + k + '" on ' + e.types[0], '', 'Remove the property or fill it in.', [e.page]); }));
+  allEnts.forEach(e => { if (typeof e.node['@type'] === 'string' && /^http:\/\/schema\.org/i.test(e.node['@type'])) add('info', 'http:// schema.org URL in @type', '', 'Use plain type names with "@context": "https://schema.org".', [e.page]); });
+
+  // breadcrumbs
+  const deep = ok.filter(p => pathOf(p.url).split('/').filter(Boolean).length >= 2);
+  const deepNoBc = deep.filter(p => !(ents.get(p.url) || []).some(e => e.types.includes('BreadcrumbList')));
+  if (deepNoBc.length) add('info', deepNoBc.length + ' nested page(s) have no BreadcrumbList', '', 'Add BreadcrumbList markup so Google can show the page path in results.', deepNoBc.map(p => p.url));
+
+  // reviews
+  const anyReview = allEnts.some(e => e.types.some(t => ['Review', 'AggregateRating'].includes(t)));
+  const revPages = ok.filter(p => p.hasTestimonialText && !(ents.get(p.url) || []).some(e => e.types.includes('Review')));
+  if (revPages.length && !anyReview) add('info', 'Testimonial/review text found but no Review markup', 'The page text mentions reviews or testimonials.', 'If these are genuine, named, visible reviews you can add Review markup. Avoid self-serving AggregateRating on your own business; Google may ignore or penalise it.', revPages.map(p => p.url));
+
+  // FAQ wording
+  ok.forEach(p => { if (/<details|faq|frequently asked/i.test(p.title) && !(ents.get(p.url) || []).some(e => e.types.includes('FAQPage'))) add('info', 'Looks like an FAQ page but has no FAQPage markup', '', 'Add FAQPage markup that mirrors the visible questions and answers.', [p.url]); });
+
+  const order = { error: 0, warn: 1, info: 2 };
+  issues.sort((a, b) => order[a.sev] - order[b.sev]);
+  // merge identical title+detail issues across pages
+  const merged = new Map();
+  issues.forEach(i => { const k = i.sev + i.title + i.detail; if (merged.has(k)) merged.get(k).pages = [...new Set(merged.get(k).pages.concat(i.pages))]; else merged.set(k, i); });
+  return [...merged.values()];
+}
+
+/* ---------- prompt ---------- */
+function compact(o, max) { const s = JSON.stringify(o, null, 2); return s.length > max ? s.slice(0, max) + '\n... [truncated]' : s; }
+function buildPrompt() {
+  const ok = pages.filter(p => !p.fetchError);
+  const site = rootUrl || (ok[0] && ok[0].url) || '(unknown)';
+  const sig = new Map();
+  ok.forEach(p => p.items.filter(i => i.nodes).forEach(i => i.nodes.forEach(n => { const k = JSON.stringify(n); (sig.get(k) || sig.set(k, new Set()).get(k)).add(p.url); })));
+  const thresh = Math.max(2, Math.ceil(ok.length * 0.5));
+  const sitewide = [...sig.entries()].filter(([, s]) => s.size >= thresh).map(([k]) => k);
+  let s = '';
+  s += 'You are a structured-data (schema.org JSON-LD) and technical SEO expert. I scanned my website ' + site + ' (' + ok.length + ' pages) and found the issues below. Please fix them.\n\n';
+  const notes = $('notes').value.trim();
+  if (notes) s += 'About my setup / extra instructions: ' + notes + '\n\n';
+  s += '## Current schema\n';
+  if (sitewide.length) {
+    s += '\nSitewide markup (same block on most pages):\n';
+    sitewide.forEach(k => { s += '```json\n' + compact(JSON.parse(k), 1800) + '\n```\n'; });
+  }
+  s += '\nPer page (types found' + (sitewide.length ? ', sitewide blocks excluded from the JSON' : '') + '):\n';
+  ok.forEach(p => {
+    const types = [...new Set(flatten(p.items.filter(i => !i.error)).filter(e => e.top).flatMap(e => e.types))];
+    s += '- ' + p.url + ': ' + (types.length ? types.join(', ') : 'NO SCHEMA') + '\n';
+  });
+  const spec = [];
+  ok.forEach(p => p.items.filter(i => i.nodes).forEach(i => i.nodes.forEach(n => { if (!sitewide.includes(JSON.stringify(n))) spec.push({ url: p.url, node: n }); })));
+  if (spec.length) {
+    s += '\nPage-specific markup:\n';
+    let budget = 6000;
+    spec.forEach(x => { if (budget <= 0) return; const j = compact(x.node, 1200); budget -= j.length; s += '\n' + x.url + '\n```json\n' + j + '\n```\n'; });
+    if (budget <= 0) s += '\n(Some page-specific markup omitted for length.)\n';
+  }
+  s += '\n## Problems found and what to do\n';
+  lastIssues.forEach((i, n) => {
+    s += (n + 1) + '. [' + i.sev.toUpperCase() + '] ' + i.title + (i.detail ? ' - ' + i.detail : '') + '\n   Fix: ' + i.fix + '\n';
+    if (i.pages.length) s += '   Pages: ' + i.pages.slice(0, 6).join(', ') + (i.pages.length > 6 ? ' (+' + (i.pages.length - 6) + ' more)' : '') + '\n';
+  });
+  if (!lastIssues.length) s += 'No problems detected. Review for further enrichment opportunities.\n';
+  s += '\n## What I want from you\n';
+  s += '- Provide complete, valid JSON-LD for each change, ready to paste, and say which page or file each block belongs on.\n';
+  s += '- Use one stable @id per key entity (e.g. ' + site.replace(/\/$/, '') + '/#website, /#org, /#agent) and link other entities to it with {"@id": "..."} instead of repeating them.\n';
+  s += '- Use absolute https URLs and "@context": "https://schema.org".\n';
+  s += '- Only use facts that are true and visible on my site. Do not invent reviews, ratings, prices or credentials. Where you need information from me, use a clear [FILL IN] placeholder and list what you need.\n';
+  s += '- At the end, list what to validate with Google\'s Rich Results Test and validator.schema.org.\n';
+  return s;
+}
+
+/* ---------- render ---------- */
+function render() {
+  $('results').classList.remove('hide');
+  const ok = pages.filter(p => !p.fetchError);
+  lastIssues = analyze();
+  const allEnts = ok.flatMap(p => flatten(p.items.filter(i => !i.error)).map(e => ({ ...e, page: p.url })));
+  $('stats').replaceChildren(
+    ...[['Pages scanned', ok.length], ['Pages with schema', ok.filter(p => p.items.some(i => !i.error)).length], ['Entities found', allEnts.length],
+        ['Errors', lastIssues.filter(i => i.sev === 'error').length], ['Warnings', lastIssues.filter(i => i.sev === 'warn').length], ['Notes', lastIssues.filter(i => i.sev === 'info').length]]
+      .map(([l, v]) => h('div', { class: 'stat' }, h('b', {}, v), h('span', {}, l))));
+
+  $('issues').replaceChildren(...(lastIssues.length ? lastIssues.map(i => h('div', { class: 'issue ' + i.sev },
+    h('div', {}, h('span', { class: 'tag' }, i.sev === 'warn' ? 'Warning' : i.sev === 'error' ? 'Error' : 'Note'), h('b', {}, i.title)),
+    i.detail ? h('div', {}, i.detail) : null,
+    h('div', { class: 'fix' }, 'Fix: ' + i.fix),
+    i.pages.length ? h('div', { class: 'pg' }, 'Pages: ' + i.pages.slice(0, 8).join(', ') + (i.pages.length > 8 ? ' (+' + (i.pages.length - 8) + ' more)' : '')) : null
+  )) : [h('div', { class: 'card ok' }, 'No problems detected.')]));
+
+  const counts = {};
+  allEnts.forEach(e => e.types.forEach(t => { (counts[t] = counts[t] || new Set()).add(e.page); }));
+  const rows = Object.keys(counts).sort((a, b) => counts[b].size - counts[a].size);
+  $('types').replaceChildren(h('tr', {}, h('th', {}, 'Type'), h('th', {}, 'On pages')), ...(rows.length ? rows.map(t => h('tr', {}, h('td', {}, t), h('td', {}, counts[t].size))) : [h('tr', {}, h('td', {}, 'None found'), h('td', {}, ''))]));
+
+  $('pages').replaceChildren(...pages.map(p => {
+    const types = [...new Set(flatten(p.items.filter(i => !i.error)).filter(e => e.top).flatMap(e => e.types))];
+    const d = h('details', {}, h('summary', {}, p.url, h('span', { class: 'badge' }, p.fetchError ? 'fetch failed' : types.length ? types.join(', ') : 'no schema')));
+    if (p.fetchError) d.append(h('p', { class: 'note' }, p.fetchError));
+    p.items.forEach(i => d.append(h('div', {}, h('div', { class: 'note' }, i.format + (i.error ? ' - ' + i.error : '')), i.error ? null : h('pre', {}, JSON.stringify(i.data, null, 2)))));
+    if (!p.items.length && !p.fetchError) d.append(h('p', { class: 'note' }, 'No structured data found on this page.'));
+    return d;
+  }));
+  $('prompt').value = buildPrompt();
+}
+
+/* ---------- wiring ---------- */
+function setTab(crawlMode) {
+  $('tabCrawl').classList.toggle('on', crawlMode); $('tabPaste').classList.toggle('on', !crawlMode);
+  $('paneCrawl').classList.toggle('hide', !crawlMode); $('panePaste').classList.toggle('hide', crawlMode);
+}
+$('tabCrawl').onclick = () => setTab(true);
+$('tabPaste').onclick = () => setTab(false);
+$('proxy').onchange = () => $('customWrap').classList.toggle('hide', $('proxy').value !== 'custom');
+$('notes').oninput = () => { $('prompt').value = buildPrompt(); };
+$('stop').onclick = () => { stopFlag = true; log('Stopping...'); };
+$('clear').onclick = () => { $('prog').classList.add('hide'); crawlWarnings = []; pages = []; rootUrl = ''; $('log').textContent = ''; $('results').classList.add('hide'); };
+$('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('prompt').value); } catch (e) { $('prompt').select(); document.execCommand('copy'); }
+  $('copy').textContent = 'Copied!'; setTimeout(() => $('copy').textContent = 'Copy prompt', 1500);
+};
+$('dl').onclick = () => {
+  const blob = new Blob([JSON.stringify({ site: rootUrl, issues: lastIssues, pages: pages.map(p => ({ url: p.url, error: p.fetchError, items: p.items })) }, null, 2)], { type: 'application/json' });
+  const a = h('a', { href: URL.createObjectURL(blob), download: 'schema-report.json' }); a.click();
+};
+$('go').onclick = async () => {
+  stopFlag = false; $('go').disabled = true; $('stop').classList.remove('hide');
+  try {
+    if ($('panePaste').classList.contains('hide')) {
+      let u = $('url').value.trim(); if (!u) { log('Enter a URL first.'); return; }
+      if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+      try { new URL(u); } catch (e) { log('That URL is not valid.'); return; }
+      pages = []; crawlWarnings = []; rootUrl = new URL(u).origin; $('log').textContent = '';
+      await crawl(u, Math.max(1, Math.min(500, +$('max').value || 60)));
+      log((stopFlag ? 'Stopped. ' : 'Done. ') + pages.length + ' page(s) processed.');
+      progress('Analyzing results...', 100);
+    } else {
+      const html = $('pasteHtml').value; if (!html.trim()) { log('Paste some HTML first.'); return; }
+      let u = $('pasteUrl').value.trim() || 'https://pasted.local/page';
+      try { new URL(u); } catch (e) { u = 'https://pasted.local/page'; }
+      if (!rootUrl && !u.includes('pasted.local')) rootUrl = new URL(u).origin;
+      progress('Reading pasted HTML...', null);
+      await new Promise(r => setTimeout(r, 50));
+      pages.push(parsePage(html, u)); log('Added ' + u);
+    }
+    progress('Building report...', 100);
+    render();
+    const n = pages.filter(p => !p.fetchError).length;
+    progress((stopFlag ? 'Stopped early - ' : 'Done - ') + n + ' page(s) scanned' + (pages.length - n ? ', ' + (pages.length - n) + ' failed' : ''), 100);
+    if (stopFlag) $('progBar').classList.add('stopped');
+  } catch (e) { log('Error: ' + e.message); progress('Stopped by an error - see log below', 0); $('progBar').classList.add('stopped'); }
+  finally { $('go').disabled = false; $('stop').classList.add('hide'); }
+};
+</script>
+</body>
+</html>
